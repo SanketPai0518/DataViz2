@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>CO₂ emissions per capita (latest year)</title>
+  <title>Internet users by country (2021)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
@@ -10,88 +10,77 @@
   <style>
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     header { padding:16px 20px; font-weight:600; }
-    #vis { max-width: 1100px; margin: 0 auto 24px; padding: 0 12px; }
-    footer { max-width:1100px; margin: 0 auto 24px; padding: 0 12px; font-size:12px; color:#555; }
+    #vis { max-width: 1000px; margin: 0 auto 24px; padding: 0 12px; }
+    footer { max-width:1000px; margin: 0 auto 24px; padding: 0 12px; font-size:12px; color:#555; }
   </style>
 </head>
 <body>
-<header>CO₂ emissions per capita (tonnes/person — latest available year)</header>
+<header>Internet users (% of population), 2021</header>
 <div id="vis"></div>
 <footer>
-  Data: Our World in Data (co₂ per capita), world.geo.json (ISO-3 codes). No local files needed.
+  Data: Our World in Data (Internet use), ISO-3166 codes, Natural Earth boundaries.
 </footer>
 
 <script>
 const spec = {
   "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-  "width": 1000, "height": 560,
+  "width": 960, "height": 520,
   "projection": {"type":"equalEarth"},
-  /* Use a GeoJSON that already has ISO-3 codes as the feature id */
   "data": {
-    "url": "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json",
-    "format": {"type":"geojson"}
+    "url": "https://cdn.jsdelivr.net/npm/vega-datasets@2/data/world-110m.json",
+    "format": {"type":"topojson","feature":"countries"}
   },
   "transform": [
-    /* id in this file is ISO-3 (e.g., 'AUS', 'USA'). Copy to 'iso3' for clarity. */
-    {"calculate": "datum.id", "as": "iso3"},
-
-    /* Join OWID CO₂-per-capita (Entity, Code, Year, <value-col>) on ISO-3 code */
+    /* Pad Natural Earth numeric id -> 3-digit string (e.g., 4 -> "004") */
     {
-      "lookup": "iso3",
+      "calculate":
+        "datum.id < 10 ? '00'+toString(datum.id) : datum.id < 100 ? '0'+toString(datum.id) : toString(datum.id)",
+      "as": "id3"
+    },
+
+    /* id3 -> ISO-3 code + name */
+    {
+      "lookup": "id3",
       "from": {
         "data": {
-          "url": "https://ourworldindata.org/grapher/co-emissions-per-capita.csv"
+          "url": "https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/all/all.csv"
         },
-        "key": "Code",
-        "fields": ["Entity","Year",
-          /* OWID sometimes uses slightly different column titles across exports.
-             Pick the first non-null among common variants and put it in 'co2pc'. */
-          "CO₂ emissions (tonnes per person)",
-          "CO2 emissions (tonnes per person)",
-          "CO2 emissions (per capita)",
-          "co2_per_capita"
-        ]
+        "key": "country-code",              /* zero-padded numeric string */
+        "fields": ["alpha-3","name"]
       }
     },
 
-    /* Collapse possible column-name variants into one numeric field 'co2pc' */
+    /* Join OWID indicator by ISO-3 code */
     {
-      "calculate":
-        "isValid(datum['CO₂ emissions (tonnes per person)']) ? datum['CO₂ emissions (tonnes per person)']" +
-        ": (isValid(datum['CO2 emissions (tonnes per person)']) ? datum['CO2 emissions (tonnes per person)']" +
-        ": (isValid(datum['CO2 emissions (per capita)']) ? datum['CO2 emissions (per capita)']" +
-        ": datum['co2_per_capita']))",
-      "as": "co2pc"
+      "lookup": "alpha-3",
+      "from": {
+        "data": {
+          "url": "https://ourworldindata.org/grapher/share-of-individuals-using-the-internet.csv"
+        },
+        "key": "Code",
+        "fields": ["Entity","Year","Individuals using the Internet (% of population)"]
+      }
     },
 
-    /* Keep latest year per country (sort by Year, then take the last) */
-    {"window": [{"op":"rank","as":"r"}], "frame":[null,null], "sort":[{"field":"Year","order":"ascending"}], "groupby":["iso3"]},
-    {"filter": "datum.r == max(datum.r)"},
-
-    /* Only rows with valid numeric values */
-    {"filter": "isValid(datum.co2pc)"}
+    /* Keep target year & valid values */
+    {"filter": "datum.Year == 2021"},
+    {"filter": "isValid(datum['Individuals using the Internet (% of population)'])"}
   ],
   "mark": {"type":"geoshape"},
   "encoding": {
     "color": {
-      "field": "co2pc",
+      "field": "Individuals using the Internet (% of population)",
       "type": "quantitative",
-      "title": "Tonnes CO₂ per person (latest)",
+      "title": "Internet users (% of population, 2021)",
       "scale": {"scheme":"blues"}
     },
     "tooltip": [
       {"field":"Entity","title":"Country"},
-      {"field":"Year","type":"temporal","title":"Year"},
-      {"field":"co2pc","type":"quantitative","title":"tCO₂ per person","format":".2f"}
+      {"field":"Individuals using the Internet (% of population)","title":"% online","format":".1f"}
     ]
   },
-  "config": {
-    "view": {"stroke": null},
-    "legend": {"orient":"right"},
-    "background":"#ffffff"
-  }
+  "config": {"view":{"stroke":null}, "legend":{"orient":"right"}}
 };
-
 vegaEmbed("#vis", spec, {actions:false});
 </script>
 </body>
