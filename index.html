@@ -2,89 +2,87 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Internet Users by Country (2021)</title>
+  <title>Internet users by country (2021)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
   <style>
-    :root { color-scheme: light; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    header { padding: 16px 20px; font-weight: 600; }
-    #vis { max-width: 1000px; margin: 0 auto 24px; padding: 0 12px 24px; }
-    footer { max-width: 1000px; margin: 0 auto 24px; padding: 0 12px; font-size: 12px; color:#555; }
+    header { padding:16px 20px; font-weight:600; }
+    #vis { max-width: 1000px; margin: 0 auto 24px; padding: 0 12px; }
+    footer { max-width:1000px; margin: 0 auto 24px; padding: 0 12px; font-size:12px; color:#555; }
   </style>
 </head>
 <body>
-  <header>Internet users (% of population), 2021</header>
-  <div id="vis"></div>
-  <footer>
-    Data: Our World in Data (Internet use), ISO-3166 country codes, Natural Earth boundaries.  
-    Tip: Serve via a local server (e.g., <code>python3 -m http.server</code>) or GitHub Pages.
-  </footer>
+<header>Internet users (% of population), 2021</header>
+<div id="vis"></div>
+<footer>
+  Data: Our World in Data (Internet use), ISO-3166 codes, Natural Earth boundaries.
+</footer>
 
-  <script>
-  const spec = {
-    "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-    "width": 960, "height": 520,
-    "projection": {"type": "equalEarth"},
-    "data": {
-      "url": "https://cdn.jsdelivr.net/npm/vega-datasets@2/data/world-110m.json",
-      "format": {"type": "topojson", "feature": "countries"}
+<script>
+const spec = {
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "width": 960, "height": 520,
+  "projection": {"type":"equalEarth"},
+  "data": {
+    "url": "https://cdn.jsdelivr.net/npm/vega-datasets@2/data/world-110m.json",
+    "format": {"type":"topojson","feature":"countries"}
+  },
+  "transform": [
+    /* Pad Natural Earth numeric id -> 3-digit string (e.g., 4 -> "004") */
+    {
+      "calculate":
+        "datum.id < 10 ? '00'+toString(datum.id) : datum.id < 100 ? '0'+toString(datum.id) : toString(datum.id)",
+      "as": "id3"
     },
-    "transform": [
-      /* Make numeric topojson id a STRING so it matches ISO table's country-code */
-      {"calculate": "toString(datum.id)", "as": "id_str"},
 
-      /* Map numeric id -> ISO-3 + country name */
-      {
-        "lookup": "id_str",
-        "from": {
-          "data": {
-            "url": "https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/all/all.csv"
-          },
-          "key": "country-code",
-          "fields": ["alpha-3","name"]
-        }
-      },
-
-      /* Join OWID internet usage indicator */
-      {
-        "lookup": "alpha-3",
-        "from": {
-          "data": {
-            "url": "https://ourworldindata.org/grapher/share-of-individuals-using-the-internet.csv"
-          },
-          "key": "Code",
-          "fields": ["Entity","Year","Individuals using the Internet (% of population)"]
-        }
-      },
-
-      /* Keep target year & valid values */
-      {"filter": "datum.Year == 2021"},
-      {"filter": "isValid(datum['Individuals using the Internet (% of population)'])"}
-    ],
-    "mark": {"type": "geoshape"},
-    "encoding": {
-      "color": {
-        "field": "Individuals using the Internet (% of population)",
-        "type": "quantitative",
-        "title": "Internet users (% of population, 2021)",
-        "scale": {"scheme": "blues"}
-      },
-      "tooltip": [
-        {"field": "Entity", "title": "Country"},
-        {"field": "Individuals using the Internet (% of population)", "title": "% online", "format": ".1f"}
-      ]
+    /* id3 -> ISO-3 code + name */
+    {
+      "lookup": "id3",
+      "from": {
+        "data": {
+          "url": "https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/all/all.csv"
+        },
+        "key": "country-code",              /* zero-padded numeric string */
+        "fields": ["alpha-3","name"]
+      }
     },
-    "config": {
-      "view": {"stroke": null},
-      "background": "#ffffff",
-      "legend": {"orient": "right"}
-    }
-  };
 
-  vegaEmbed("#vis", spec, {actions: false});
-  </script>
+    /* Join OWID indicator by ISO-3 code */
+    {
+      "lookup": "alpha-3",
+      "from": {
+        "data": {
+          "url": "https://ourworldindata.org/grapher/share-of-individuals-using-the-internet.csv"
+        },
+        "key": "Code",
+        "fields": ["Entity","Year","Individuals using the Internet (% of population)"]
+      }
+    },
+
+    /* Keep target year & valid values */
+    {"filter": "datum.Year == 2021"},
+    {"filter": "isValid(datum['Individuals using the Internet (% of population)'])"}
+  ],
+  "mark": {"type":"geoshape"},
+  "encoding": {
+    "color": {
+      "field": "Individuals using the Internet (% of population)",
+      "type": "quantitative",
+      "title": "Internet users (% of population, 2021)",
+      "scale": {"scheme":"blues"}
+    },
+    "tooltip": [
+      {"field":"Entity","title":"Country"},
+      {"field":"Individuals using the Internet (% of population)","title":"% online","format":".1f"}
+    ]
+  },
+  "config": {"view":{"stroke":null}, "legend":{"orient":"right"}}
+};
+vegaEmbed("#vis", spec, {actions:false});
+</script>
 </body>
 </html>
+
