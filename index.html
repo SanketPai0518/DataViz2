@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Internet users (% of population), 2021</title>
+  <title>Who’s Online: Internet Users by Country (2021)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
@@ -15,7 +15,7 @@
   </style>
 </head>
 <body>
-<header>Internet users (% of population), 2021</header>
+<header>Who’s Online: Internet Users (% of Population) by Country, 2021</header>
 <div id="vis"></div>
 <footer>Local data only: <code>data/countries.geojson</code> + <code>data/internet_users_2021.csv</code></footer>
 
@@ -25,9 +25,15 @@ const spec = {
   "width": 1000, "height": 560,
   "projection": {"type": "equalEarth"},
   "layer": [
-    {"data": {"sphere": true}, "mark": {"type": "geoshape", "fill": "#eaf3ff"}},
-    {"data": {"graticule": {"step": [30, 30]}},
-     "mark": {"type": "geoshape", "stroke": "#bcd0e3", "strokeWidth": 0.6, "filled": false}},
+    { "data": {"sphere": true}, "mark": {"type": "geoshape", "fill": "#eaf3ff"} },
+    { "data": {"graticule": {"step": [30, 30]}},
+      "mark": {"type": "geoshape", "stroke": "#bcd0e3", "strokeWidth": 0.6, "filled": false} },
+
+    {
+      "data": { "url": "data/countries.geojson", "format": { "type": "json", "property": "features" } },
+      "mark": { "type": "geoshape", "fill": "#eef2f7" },
+      "encoding": { "shape": { "field": "geometry", "type": "geojson" } }
+    },
 
     {
       "data": {
@@ -35,7 +41,6 @@ const spec = {
         "format": { "type": "json", "property": "features" }
       },
       "transform": [
-        /* Build a robust ISO3 from multiple possible properties; drop invalid codes like -99 */
         {
           "calculate":
             "upper((isValid(datum.properties['ISO3166-1-Alpha-3']) ? datum.properties['ISO3166-1-Alpha-3'] :" +
@@ -46,8 +51,6 @@ const spec = {
         { "calculate": "replace(datum.iso_raw, ' ', '')", "as": "iso_clean" },
         { "filter": "datum.iso_clean && datum.iso_clean != '-99' && length(datum.iso_clean) == 3" },
         { "calculate": "datum.iso_clean", "as": "iso3" },
-
-        /* Join to the 2021-only CSV */
         {
           "lookup": "iso3",
           "from": {
@@ -64,8 +67,8 @@ const spec = {
         "color": {
           "field": "Value",
           "type": "quantitative",
-          "title": "Internet users (% of population, 2021)",
-          "scale": { "scheme": "blues" }
+          "title": "Internet users (%), 2021",
+          "scale": { "scheme": "blues", "domain": [0, 100] }
         },
         "tooltip": [
           { "field": "Entity", "title": "Country" },
@@ -82,9 +85,10 @@ const spec = {
     }
   ],
   "config": {
-    "view": { "stroke": null },
+    "view": { "stroke": null, "continuousWidth": 1000, "continuousHeight": 560 },
     "legend": { "orient": "right", "titleFontWeight": "bold" },
-    "background": "#ffffff"
+    "background": "#ffffff",
+    "padding": 0
   }
 };
 
