@@ -8,78 +8,87 @@
   <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
   <style>
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    header { padding:16px 20px; font-weight:600; }
-    #vis { max-width: 1100px; margin: 0 auto 24px; padding: 0 12px; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#fafbff; }
+    header { padding:14px 18px; font-weight:700; }
+    #vis { max-width: 1100px; margin: 0 auto 18px; padding: 0 12px; }
     footer { max-width:1100px; margin: 0 auto 24px; padding: 0 12px; font-size:12px; color:#555; }
   </style>
 </head>
 <body>
 <header>Internet users (% of population), 2021</header>
 <div id="vis"></div>
-<footer>
-  If you swap the GeoJSON URL, this spec will still work as long as it has one of:
-  <code>id</code>, <code>properties.ISO_A3</code>, or <code>properties["ISO3166-1-Alpha-3"]</code>.
-</footer>
+<footer>Local data only: <code>data/countries.geojson</code> + <code>data/internet_users_2021.csv</code></footer>
 
 <script>
 const spec = {
   "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
   "width": 1000, "height": 560,
-  "projection": {"type":"equalEarth"},
+  "projection": {"type": "equalEarth"},
+  "layer": [
+    {"data": {"sphere": true}, "mark": {"type": "geoshape", "fill": "#eaf3ff"}},
+    {"data": {"graticule": {"step": [30, 30]}},
+     "mark": {"type": "geoshape", "stroke": "#bcd0e3", "strokeWidth": 0.6, "filled": false}},
 
-  /* Use YOUR GeoJSON here. If you keep mine, it's fine too. */
-  "data": {
-    "url": "https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson",
-    "format": {"type":"geojson"}
-  },
-
-  "transform": [
-    /* Create a unified ISO3 code from whichever field exists */
     {
-      "calculate":
-        "isValid(datum.id) ? datum.id " +
-        ": (isValid(datum.properties.ISO_A3) ? datum.properties.ISO_A3 " +
-        ": datum.properties['ISO3166-1-Alpha-3'])",
-      "as": "iso3"
-    },
-
-    /* Join OWID Internet-use dataset by ISO-3 */
-    {
-      "lookup": "iso3",
-      "from": {
-        "data": {
-          "url": "https://ourworldindata.org/grapher/share-of-individuals-using-the-internet.csv"
+      "data": {
+        "url": "data/countries.geojson",
+        "format": { "type": "json", "property": "features" }
+      },
+      "transform": [
+        /* Build a robust ISO3 from multiple possible properties; drop invalid codes like -99 */
+        {
+          "calculate":
+            "upper((isValid(datum.properties['ISO3166-1-Alpha-3']) ? datum.properties['ISO3166-1-Alpha-3'] :" +
+            " (isValid(datum.properties.ISO_A3) ? datum.properties.ISO_A3 :" +
+            " (isValid(datum.properties.ADM0_A3) ? datum.properties.ADM0_A3 : datum.properties.SOV_A3))))",
+          "as": "iso_raw"
         },
-        "key": "Code",
-        "fields": ["Entity","Year","Individuals using the Internet (% of population)"]
+        { "calculate": "replace(datum.iso_raw, ' ', '')", "as": "iso_clean" },
+        { "filter": "datum.iso_clean && datum.iso_clean != '-99' && length(datum.iso_clean) == 3" },
+        { "calculate": "datum.iso_clean", "as": "iso3" },
+
+        /* Join to the 2021-only CSV */
+        {
+          "lookup": "iso3",
+          "from": {
+            "data": { "url": "data/internet_users_2021.csv" },
+            "key": "Code",
+            "fields": ["Entity","Value"]
+          }
+        },
+        { "filter": "isValid(datum.Value)" }
+      ],
+      "mark": { "type": "geoshape" },
+      "encoding": {
+        "shape": { "field": "geometry", "type": "geojson" },
+        "color": {
+          "field": "Value",
+          "type": "quantitative",
+          "title": "Internet users (% of population, 2021)",
+          "scale": { "scheme": "blues" }
+        },
+        "tooltip": [
+          { "field": "Entity", "title": "Country" },
+          { "field": "iso3", "title": "ISO3" },
+          { "field": "Value", "title": "% online", "format": ".1f" }
+        ]
       }
     },
 
-    /* Keep 2021 and valid values */
-    {"filter": "datum.Year == 2021"},
-    {"filter": "isValid(datum['Individuals using the Internet (% of population)'])"}
+    {
+      "data": { "url": "data/countries.geojson", "format": { "type": "json", "property": "features" } },
+      "mark": { "type": "geoshape", "filled": false, "stroke": "#ffffff", "strokeWidth": 0.5 },
+      "encoding": { "shape": { "field": "geometry", "type": "geojson" } }
+    }
   ],
-
-  "mark": {"type":"geoshape"},
-
-  "encoding": {
-    "color": {
-      "field": "Individuals using the Internet (% of population)",
-      "type": "quantitative",
-      "title": "Internet users (% of population, 2021)",
-      "scale": {"scheme":"blues"}
-    },
-    "tooltip": [
-      {"field":"Entity","title":"Country"},
-      {"field":"Individuals using the Internet (% of population)","title":"% online","format":".1f"}
-    ]
-  },
-
-  "config": {"view":{"stroke":null}, "legend":{"orient":"right"}, "background":"#ffffff"}
+  "config": {
+    "view": { "stroke": null },
+    "legend": { "orient": "right", "titleFontWeight": "bold" },
+    "background": "#ffffff"
+  }
 };
 
-vegaEmbed("#vis", spec, {actions:false});
+vegaEmbed("#vis", spec, { actions: false });
 </script>
 </body>
 </html>
