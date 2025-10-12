@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Who’s Online – Interactive Visualisations</title>
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <style>
+    :root { --ink:#0f172a; --muted:#64748b; --hair:#e2e8f0; }
+    html,body{ margin:0; background:#fafbff; }
+    body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:var(--ink); }
+    header{ padding:16px 18px; font-weight:700; }
+    main{ max-width:1100px; margin:0 auto; padding:0 12px 28px; }
+    .viz{ background:#fff; border:1px solid var(--hair); border-radius:12px; padding:12px; margin-bottom:22px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    .caption{ font-size:12px; color:var(--muted); margin:6px 2px 16px; }
+    footer{ max-width:1100px; margin:0 auto 28px; padding:0 12px; font-size:12px; color:#555; }
+    code{ background:#eef2f7; padding:2px 6px; border-radius:6px; }
+  </style>
+</head>
+<body>
+<header>Who’s Online – Interactive Visualisations</header>
+<main>
+  <section class="viz">
+    <h3 style="margin:6px 4px 8px;">1) Choropleth (2021)</h3>
+    <div id="visMap"></div>
+    <div class="caption">Equal-Earth choropleth. Looks up 2021 <code>Value</code> by ISO3 from your CSV.</div>
+  </section>
+
+  <section class="viz">
+    <h3 style="margin:6px 4px 8px;">2) Interactive Time-Series (1990–2021)</h3>
+    <div id="visLines"></div>
+    <div class="caption">Slider filters year; dropdown (auto-built from data) selects the focus country. Robust header parsing for <em>Year</em> and value column.</div>
+  </section>
+</main>
+<footer>Place data here: <code>data/countries.geojson</code>, <code>data/internet_users_2021.csv</code>, <code>data/internet_users_timeseries.csv</code>.</footer>
+
+<script>
+/* -------------------- Spec 1: Map (2021) -------------------- */
+const mapSpec = {
+  $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+  width: 1000, height: 560,
+  projection: { type: "equalEarth" },
+  layer: [
+    { data: { sphere: true }, mark: { type: "geoshape", fill: "#eaf3ff" } },
+    { data: { graticule: { step: [30,30] } }, mark: { type: "geoshape", stroke: "#bcd0e3", strokeWidth: 0.6, filled: false } },
+    {
+      data: { url: "data/countries.geojson", format: { type: "json", property: "features" } },
+      mark: { type: "geoshape", fill: "#eef2f7" },
+      encoding: { shape: { field: "geometry", type: "geojson" } }
+    },
+    {
+      data: { url: "data/countries.geojson", format: { type: "json", property: "features" } },
+      transform: [
+        {
+          // Try multiple common ISO3 property names and clean
+          calculate:
+            "upper((isValid(datum.properties['ISO3166-1-Alpha-3']) ? datum.properties['ISO3166-1-Alpha-3'] : " +
+            "(isValid(datum.properties.ISO_A3) ? datum.properties.ISO_A3 : " +
+            "(isValid(datum.properties.ADM0_A3) ? datum.properties.ADM0_A3 : datum.properties.SOV_A3))))",
+          as: "iso_raw"
+        },
+        { calculate: "replace(datum.iso_raw, ' ', '')", as: "iso3" },
+        { filter: "datum.iso3 && datum.iso3 != '-99' && length(datum.iso3) == 3" },
+        { lookup: "iso3", from: { data: { url: "data/internet_users_2021.csv" }, key: "Code", fields: ["Entity","Value"] } },
+        { filter: "isValid(datum.Value)" }
+      ],
+      mark: { type: "geoshape" },
+      encoding: {
+        shape: { field: "geometry", type: "geojson" },
+        color: { field: "Value", type: "quantitative", title: "Internet users (%), 2021",
+                 scale: { scheme: "blues", domain: [0,100] } },
+        tooltip: [
+          { field: "Entity", title: "Country" },
+          { field: "iso3", title: "ISO3" },
+          { field: "Value", title: "% online", format: ".1f" }
+        ]
+      }
+    },
+    {
+      data: { url: "data/countries.geojson", format: { type: "json", property: "features" } },
+      mark: { type: "geoshape", filled: false, stroke: "#ffffff", strokeWidth: 0.5 },
+      encoding: { shape: { field: "geometry", type: "geojson" } }
+    }
+  ],
+  config: { view: { stroke: null }, legend: { orient: "right", titleFontWeight: "bold" }, background: "#ffffff", padding: 0 }
+};
+
+/* -------------------- Spec 2: Time-series (robust parsing) -------------------- */
+const lineSpec = {
+  $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+  width: 1000, height: 420,
+  data: { url: "data/internet_users_timeseries.csv" },
+  transform: [
+    // Year (handles BOM/casing)
+    { calculate: "toNumber(datum['Year'] ?? datum['\\ufeffYear'] ?? datum['year'])", as: "YearQ" },
+    // Value (accept several common headers)
+    { calculate: "toNumber(datum['Value'] ?? datum['value'] ?? datum['Internet users (share of population)'] ?? datum['share-of-individuals-using-the-internet'])", as: "ValQ" },
+    { filter: "isFinite(datum.YearQ) && isFinite(datum.ValQ)" }
+  ],
+  params: [
+    { name: "maxYear", value: 2021,
+      bind: { input: "range", min: 1990, max: 2021, step: 1, name: "Show years up to: " } },
+    // no bind here; we will control this with an external dropdown built from data
+    { name: "focusCountry", value: "Australia" }
+  ],
+  layer: [
+    { // background: all countries
+      transform: [ { filter: "datum.YearQ <= maxYear" } ],
+      mark: { type: "line", opacity: 0.15 },
+      encoding: {
+        x: { field: "YearQ", type: "quantitative", axis: { format: "d" }, scale: { domain: [1990,2021] }, title: "Year" },
+        y: { field: "ValQ",  type: "quantitative", title: "Internet users (% of population)", scale: { domain: [0,100] } },
+        detail: { field: "Entity" },
+        tooltip: [
+          { field: "Entity", title: "Country" },
+          { field: "YearQ",  type: "quantitative", title: "Year" },
+          { field: "ValQ",   type: "quantitative", title: "Internet users (%)", format: ".1f" }
+        ]
+      }
+    },
+    { // focus country line
+      transform: [ { filter: "datum.YearQ <= maxYear && datum.Entity == focusCountry" } ],
+      mark: { type: "line", strokeWidth: 3, color: "#1f77b4" },
+      encoding: { x: { field: "YearQ", type: "quantitative" }, y: { field: "ValQ", type: "quantitative" } }
+    },
+    { // focus points
+      transform: [ { filter: "datum.YearQ <= maxYear && datum.Entity == focusCountry" } ],
+      mark: { type: "point", size: 40, color: "#1f77b4" },
+      encoding: {
+        x: { field: "YearQ", type: "quantitative" },
+        y: { field: "ValQ",  type: "quantitative" },
+        tooltip: [
+          { field: "Entity", title: "Country" },
+          { field: "YearQ",  type: "quantitative", title: "Year" },
+          { field: "ValQ",   type: "quantitative", title: "Internet users (%)", format: ".1f" }
+        ]
+      }
+    },
+    { // annotation: 2007
+      data: { values: [ { x: 2007, label: "2007: Smartphone era begins" } ] },
+      layer: [
+        { mark: { type: "rule", strokeDash: [6,4], color: "#9ca3af" }, encoding: { x: { field: "x", type: "quantitative" } } },
+        { mark: { type: "text", align: "left", dx: 6, dy: -6, fontSize: 12, color: "#6b7280" },
+          encoding: { x: { field: "x", type: "quantitative" }, y: { value: 6 }, text: { field: "label" } } }
+      ]
+    },
+    { // annotation: 2020
+      data: { values: [ { x: 2020, label: "2020: Pandemic-related surge" } ] },
+      layer: [
+        { mark: { type: "rule", strokeDash: [6,4], color: "#9ca3af" }, encoding: { x: { field: "x", type: "quantitative" } } },
+        { mark: { type: "text", align: "left", dx: 6, dy: -6, fontSize: 12, color: "#6b7280" },
+          encoding: { x: { field: "x", type: "quantitative" }, y: { value: 12 }, text: { field: "label" } } }
+      ]
+    }
+  ],
+  config: { view: { stroke: null }, axis: { grid: true, gridColor: "#eef2f7" }, background: "#ffffff" }
+};
+
+/* -------------------- Render + build dynamic dropdown -------------------- */
+vegaEmbed("#visMap", mapSpec, { actions:false });
+
+vegaEmbed("#visLines", lineSpec, { actions:false }).then(async ({view}) => {
+  await view.runAsync();
+
+  // Wait until VL has materialized the input table (dataset name is usually 'source_0').
+  function buildDropdownWhenReady() {
+    const ds = view.data('source_0');
+    if (!ds || !ds.length) {
+      requestAnimationFrame(buildDropdownWhenReady);
+      return;
+    }
+    const rows = ds.filter(d => d.Entity && String(d.Entity).trim().length);
+    const countries = Array.from(new Set(rows.map(d => String(d.Entity).trim()))).sort();
+
+    const wrap = document.createElement('div');
+    wrap.style.margin = '8px 0 14px';
+    wrap.innerHTML = `
+      <label style="margin-right:8px;color:#334155">Focus country:</label>
+      <select id="countrySel"></select>`;
+    document.querySelector('#visLines').prepend(wrap);
+
+    const sel = wrap.querySelector('#countrySel');
+    sel.innerHTML = countries.map(c => `<option value="${c}">${c}</option>`).join('');
+
+    const initial = view.signal('focusCountry') || countries[0];
+    view.signal('focusCountry', initial).runAsync();
+    sel.value = initial;
+
+    sel.addEventListener('change', e => {
+      view.signal('focusCountry', e.target.value).runAsync();
+    });
+  }
+  buildDropdownWhenReady();
+});
+</script>
+</body>
+</html>

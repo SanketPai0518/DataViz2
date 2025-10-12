@@ -1,98 +1,425 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Who’s Online: Internet Users by Country (2021)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Who’s Online — Choropleth + GDP Correlation</title>
+
+  <!-- Load libs in this exact order -->
   <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-dsv@3"></script>
+
   <style>
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#fafbff; }
-    header { padding:14px 18px; font-weight:700; }
-    #vis { max-width: 1100px; margin: 0 auto 18px; padding: 0 12px; }
-    footer { max-width:1100px; margin: 0 auto 24px; padding: 0 12px; font-size:12px; color:#555; }
+    :root { --ink:#0f172a; --muted:#64748b; --hair:#e2e8f0; }
+    html,body{ margin:0; background:#fafbff; }
+    body{ font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--ink); }
+    header{ padding:16px 18px; font-weight:700; }
+    main{ max-width:1100px; margin:0 auto; padding:0 12px 28px; }
+    .viz{ background:#fff; border:1px solid var(--hair); border-radius:12px; padding:12px; margin:18px 0 24px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    .caption{ font-size:12px; color:var(--muted); margin:6px 2px 12px; }
+    footer{ max-width:1100px; margin:0 auto 28px; padding:0 12px; font-size:12px; color:#555; }
+    code{ background:#eef2f7; padding:2px 6px; border-radius:6px; }
+    .controls{ font-size:12px; display:flex; align-items:center; gap:18px; margin:6px 0 8px; flex-wrap:wrap; }
+    .controls label{ display:flex; align-items:center; gap:8px; }
+    .pill{ background:#eef2f7; padding:2px 8px; border-radius:999px; font-weight:600; }
+    select, input[type="range"]{ vertical-align:middle; }
+    .warn{ font-size:13px; color:#b91c1c; background:#fee2e2; border:1px solid #fecaca; padding:10px; border-radius:8px; }
   </style>
 </head>
 <body>
-<header>Who’s Online: Internet Users (% of Population) by Country, 2021</header>
-<div id="vis"></div>
-<footer>Local data only: <code>data/countries.geojson</code> + <code>data/internet_users_2021.csv</code></footer>
+<header>Who’s Online — Interactive Visualisations</header>
+
+<main>
+  <!-- MAP: 2021 choropleth -->
+  <section class="viz">
+    <h3 style="margin:6px 4px 8px;">Choropleth — Internet users (%), 2021</h3>
+    <div id="visMap2021"></div>
+    <div class="caption">
+      Equal-Earth choropleth using <code>data/countries.geojson</code> with ISO3 lookup into <code>data/internet_users_2021.csv</code>.
+      Includes slider filter and on-chart annotation.
+    </div>
+  </section>
+
+  <!-- SCATTER: GDP per capita vs Internet Users -->
+  <section class="viz">
+    <h3 style="margin:6px 4px 8px;">GDP per capita vs Internet Users — correlation by year</h3>
+
+    <div class="controls" id="scatterControls" style="display:none;">
+      <label>Year:
+        <select id="yearSelect"></select>
+      </label>
+      <label>Top-N (by GDP pc):
+        <input id="topNRange" type="range" min="10" max="80" step="5" value="40">
+        <span id="topNVal" class="pill">40</span>
+      </label>
+    </div>
+
+    <div id="visScatter"></div>
+    <div id="scatterMsg" class="caption"></div>
+  </section>
+</main>
+
+<footer>
+  Data files required:
+  <code>data/countries.geojson</code>,
+  <code>data/internet_users_2021.csv</code>,
+  <code>data/API_NY.GDP.PCAP.CD_DS2_en_csv_v2_24794.csv</code>
+  (Internet share pulled live from OWID).
+</footer>
 
 <script>
-const spec = {
-  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-  "width": 1000, "height": 560,
-  "projection": {"type": "equalEarth"},
-  "layer": [
-    { "data": {"sphere": true}, "mark": {"type": "geoshape", "fill": "#eaf3ff"} },
-    { "data": {"graticule": {"step": [30, 30]}},
-      "mark": {"type": "geoshape", "stroke": "#bcd0e3", "strokeWidth": 0.6, "filled": false} },
+/* ---------- Paths ---------- */
+const GDP_FILE  = "data/API_NY.GDP.PCAP.CD_DS2_en_csv_v2_24794.csv"; // WB GDP per capita (wide)
+const IU_OWID   = "https://ourworldindata.org/grapher/share-of-individuals-using-the-internet.csv"; // long CSV
 
+/* =====================  MAP 2021  ===================== */
+const map2021 = {
+  $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+  width: 1000, height: 560,
+  background: "#ffffff",
+  padding: 0,
+  projection: { type: "equalEarth" },
+  params: [
+    { name: "minPct", value: 0,
+      bind: { input: "range", min: 0, max: 100, step: 5, name: "Show countries with ≥ " } }
+  ],
+  layer: [
+    { data: { sphere: true }, mark: { type: "geoshape", fill: "#eaf3ff" } },
+    { data: { graticule: { step: [30,30] } },
+      mark: { type: "geoshape", stroke: "#bcd0e3", strokeWidth: 0.6, filled: false } },
+    { data: { url: "data/countries.geojson", format: { type: "json", property: "features" } },
+      mark: { type: "geoshape", fill: "#eef2f7" },
+      encoding: { shape: { field: "geometry", type: "geojson" } } },
     {
-      "data": { "url": "data/countries.geojson", "format": { "type": "json", "property": "features" } },
-      "mark": { "type": "geoshape", "fill": "#eef2f7" },
-      "encoding": { "shape": { "field": "geometry", "type": "geojson" } }
-    },
-
-    {
-      "data": {
-        "url": "data/countries.geojson",
-        "format": { "type": "json", "property": "features" }
-      },
-      "transform": [
-        {
-          "calculate":
-            "upper((isValid(datum.properties['ISO3166-1-Alpha-3']) ? datum.properties['ISO3166-1-Alpha-3'] :" +
-            " (isValid(datum.properties.ISO_A3) ? datum.properties.ISO_A3 :" +
-            " (isValid(datum.properties.ADM0_A3) ? datum.properties.ADM0_A3 : datum.properties.SOV_A3))))",
-          "as": "iso_raw"
+      data: { url: "data/countries.geojson", format: { type: "json", property: "features" } },
+      transform: [
+        { calculate:
+          "upper((isValid(datum.properties['ISO3166-1-Alpha-3']) ? datum.properties['ISO3166-1-Alpha-3'] : " +
+          "(isValid(datum.properties.ISO_A3) ? datum.properties.ISO_A3 : " +
+          "(isValid(datum.properties.ADM0_A3) ? datum.properties.ADM0_A3 : datum.properties.SOV_A3))))",
+          as: "iso_raw"
         },
-        { "calculate": "replace(datum.iso_raw, ' ', '')", "as": "iso_clean" },
-        { "filter": "datum.iso_clean && datum.iso_clean != '-99' && length(datum.iso_clean) == 3" },
-        { "calculate": "datum.iso_clean", "as": "iso3" },
-        {
-          "lookup": "iso3",
-          "from": {
-            "data": { "url": "data/internet_users_2021.csv" },
-            "key": "Code",
-            "fields": ["Entity","Value"]
-          }
-        },
-        { "filter": "isValid(datum.Value)" }
+        { calculate: "replace(datum.iso_raw, ' ', '')", as: "iso3" },
+        { lookup: "iso3",
+          from: { data: { url: "data/internet_users_2021.csv" }, key: "Code", fields: ["Entity","Value"] } },
+        { calculate: "isValid(datum.Value) && datum.Value >= minPct ? 1 : 0", as: "meets" }
       ],
-      "mark": { "type": "geoshape" },
-      "encoding": {
-        "shape": { "field": "geometry", "type": "geojson" },
-        "color": {
-          "field": "Value",
-          "type": "quantitative",
-          "title": "Internet users (%), 2021",
-          "scale": { "scheme": "blues", "domain": [0, 100] }
-        },
-        "tooltip": [
-          { "field": "Entity", "title": "Country" },
-          { "field": "iso3", "title": "ISO3" },
-          { "field": "Value", "title": "% online", "format": ".1f" }
-        ]
-      }
+      layer: [
+        { transform: [ { filter: "datum.meets == 0" } ],
+          mark: { type: "geoshape", fill: "#e5e7eb" },
+          encoding: { shape: { field: "geometry", type: "geojson" } } },
+        { transform: [ { filter: "datum.meets == 1" } ],
+          mark: { type: "geoshape" },
+          encoding: {
+            shape: { field: "geometry", type: "geojson" },
+            color: {
+              field: "Value", type: "quantitative",
+              title: "Internet users (%), 2021",
+              scale: { scheme: "blues", domain: [0,100] }
+            },
+            tooltip: [
+              { field: "Entity", title: "Country" },
+              { field: "iso3",   title: "ISO3" },
+              { field: "Value",  title: "% online", format: ".1f" }
+            ]
+          } }
+      ]
     },
-
-    {
-      "data": { "url": "data/countries.geojson", "format": { "type": "json", "property": "features" } },
-      "mark": { "type": "geoshape", "filled": false, "stroke": "#ffffff", "strokeWidth": 0.5 },
-      "encoding": { "shape": { "field": "geometry", "type": "geojson" } }
+    { data: { url: "data/countries.geojson", format: { type: "json", property: "features" } },
+      mark: { type: "geoshape", filled: false, stroke: "#ffffff", strokeWidth: 0.5 },
+      encoding: { shape: { field: "geometry", type: "geojson" } } },
+    { data: { url: "data/internet_users_2021.csv" },
+      transform: [
+        { filter: "isValid(datum.Value)" },
+        { filter: "datum.Value >= minPct" },
+        { aggregate: [ { op: "count", as: "n" }, { op: "median", field: "Value", as: "med" } ] },
+        { calculate: "'Countries ≥ ' + minPct + '%: ' + datum.n + ' • median = ' + format(datum.med, '.1f') + '%'", as: "label" }
+      ],
+      layer: [
+        { mark: { type: "text", fontSize: 12, fontWeight: "bold", align: "left", baseline: "top" },
+          encoding: { x: { value: 24 }, y: { value: 24 }, text: { field: "label" }, color: { value: "#0f172a" } } },
+        { mark: { type: "rule", strokeWidth: 2, opacity: 0.6 },
+          encoding: { x: { value: 24 }, x2: { value: 340 }, y: { value: 44 }, color: { value: "#94a3b8" } } }
+      ]
     }
   ],
-  "config": {
-    "view": { "stroke": null, "continuousWidth": 1000, "continuousHeight": 560 },
-    "legend": { "orient": "right", "titleFontWeight": "bold" },
-    "background": "#ffffff",
-    "padding": 0
-  }
+  config: { view: { stroke: null }, legend: { orient: "right", titleFontWeight: "bold" }, axis: { labelFontSize: 12, titleFontSize: 12 } }
 };
 
-vegaEmbed("#vis", spec, { actions: false });
+/* HELPERS FOR SCATTER  */
+const WB_HEADER_RE = new RegExp(
+  '^\\s*"?Country Name"?\\s*[,;\\t]\\s*"?Country Code"?\\s*[,;\\t]\\s*"?Indicator Name"?\\s*[,;\\t]\\s*"?Indicator Code"?\\s*[,;\\t]',
+  'i'
+);
+
+function stripBOMAndCRLF(t){ if (t && t.charCodeAt(0)===0xFEFF) t=t.slice(1); return t.replace(/\r\n?/g,"\n"); }
+
+async function loadWorldBankGDPWide(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(`Fetch failed for ${url}: ${r.status} ${r.statusText}`);
+  const text = stripBOMAndCRLF(await r.text());
+  const lines = text.split("\n");
+
+  let headerIdx = -1;
+  for (let i=0;i<lines.length;i++){ if (WB_HEADER_RE.test(lines[i])) { headerIdx = i; break; } }
+  if (headerIdx < 0) {
+    const first10 = lines.slice(0,10).join("\n");
+    throw new Error(`Couldn't find a proper World Bank header in ${url}.\nFirst lines:\n${first10}`);
+  }
+
+  const normalized = lines.slice(headerIdx).map(l=>l.replace(/\t|;/g, ",")).join("\n");
+  const table = d3.csvParse(normalized);
+
+  const nameCol = table.columns.find(c => c.trim().toLowerCase()==="country name");
+  const codeCol = table.columns.find(c => c.trim().toLowerCase()==="country code");
+  const indCol  = table.columns.find(c => c.trim().toLowerCase()==="indicator code");
+  if(!(nameCol && codeCol && indCol)) throw new Error("Missing required columns in WB CSV.");
+
+  const out = [];
+  for (const row of table){
+    if ((row[indCol]||"").toUpperCase() !== "NY.GDP.PCAP.CD") continue;
+    const country = row[nameCol];
+    const code    = row[codeCol];
+    for (const k of Object.keys(row)){
+      const m = k.match(/^(\d{4})(?:\s*\[YR\1\])?$/);
+      if (m){
+        const v = row[k]==="" ? NaN : +row[k];
+        if (Number.isFinite(v)) out.push({country, code, year:+m[1], gdp:v});
+      }
+    }
+  }
+  if(!out.length) throw new Error("Parsed GDP file but found no numeric year values for NY.GDP.PCAP.CD");
+  return out;
+}
+
+async function loadInternetUsersOWID(){
+  const r = await fetch(IU_OWID);
+  if (!r.ok) throw new Error(`Fetch failed for ${IU_OWID}: ${r.status}`);
+
+  // helpers
+  const strip = t => {
+    if (t && t.charCodeAt(0) === 0xFEFF) t = t.slice(1);
+    return t.replace(/\r\n?/g, "\n");
+  };
+  const norm = s => (s||"")
+    .replace(/\u200B/g,"")              
+    .replace(/[^\p{L}\p{N}]+/gu," ")     
+    .trim().toLowerCase();
+  const toNum = v => {
+    if (v == null) return NaN;
+    const s = String(v).replace(/%/g,"").replace(/\u200B/g,"").trim();
+    const n = +s;
+    return Number.isFinite(n) ? n : NaN;
+  };
+
+  const txt = strip(await r.text());
+  const table = d3.csvParse(txt);
+
+  // normalize column names 
+  const colByNorm = new Map(table.columns.map(c => [norm(c), c]));
+
+  // required
+  const codeCol = colByNorm.get("code") || colByNorm.get("country code");
+  const yearCol = colByNorm.get("year");
+  const nameCol = colByNorm.get("entity") || colByNorm.get("country") || colByNorm.get("country name");
+
+  // metric candidates
+  const metricCandidates = [
+    "share of individuals using the internet",
+    "share-of-individuals-using-the-internet",
+    "internet users (share of population)",
+    "individuals using the internet % of population",
+    "value"
+  ];
+  let valCol = null;
+  for (const cand of metricCandidates){
+    const hit = colByNorm.get(norm(cand));
+    if (hit){ valCol = hit; break; }
+  }
+  if (!valCol) {
+    const guesses = table.columns.filter(c => {
+      const s = norm(c);
+      return s.includes("internet") && (s.includes("share") || s.includes("%") || s.includes("population"));
+    });
+    valCol = guesses[0];
+  }
+
+  if (!(codeCol && yearCol && valCol)) {
+    throw new Error(`OWID schema mismatch (need Code, Year, Value). Found: ${table.columns.join(", ")}`);
+  }
+
+  let rows = [];
+  for (const rec of table){
+    const code = (rec[codeCol]||"").trim();
+    const year = +rec[yearCol];
+    const raw  = rec[valCol];
+    const val  = toNum(raw);
+    const country = nameCol ? rec[nameCol] : undefined;
+    if (code && Number.isFinite(year) && Number.isFinite(val)) {
+      rows.push({ country, code, year, internet: val });
+    }
+  }
+  if (!rows.length) throw new Error("OWID parsed but no numeric rows were found.");
+  const sample = rows.slice(0, Math.min(500, rows.length));
+  const fracShare = sample.reduce((a, d) => a + (d.internet > 0 && d.internet <= 1 ? 1 : 0), 0) / sample.length;
+  if (fracShare > 0.6) rows = rows.map(d => ({ ...d, internet: d.internet * 100 }));
+
+  return rows;
+}
+
+/* Join by (Code, Year) and pick best year (max overlap) */
+function buildJoinedByYear(gdpLong, iuLong){
+  const iuMap = new Map(iuLong.map(r => [`${r.code}|${r.year}`, r]));
+  const joined = [];
+  for (const g of gdpLong){
+    const k = `${g.code}|${g.year}`;
+    if (iuMap.has(k)) {
+      const iu = iuMap.get(k);
+      joined.push({country: iu.country || g.country, code:g.code, year:g.year, gdp:g.gdp, internet: iu.internet});
+    }
+  }
+  if(!joined.length) throw new Error("No overlapping years between GDP and Internet Users.");
+
+  const byYear = new Map();
+  for (const r of joined){
+    if(!byYear.has(r.year)) byYear.set(r.year, []);
+    byYear.get(r.year).push(r);
+  }
+
+  const years = [...byYear.keys()].sort((a,b)=>a-b);
+  const best = years
+    .map(y => ({ year:y, n: byYear.get(y).length }))
+    .sort((a,b) => (b.n - a.n) || (b.year - a.year))[0].year;
+
+  return { byYear, years, defaultYear: best };
+}
+
+/* Pearson correlation */
+function pearsonR(rows){
+  const xs = rows.map(d=>Math.log(d.gdp)); // log gdp to match plot scale
+  const ys = rows.map(d=>d.internet);
+  const n = rows.length;
+  if (n < 3) return NaN;
+  const mean = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
+  const mx = mean(xs), my = mean(ys);
+  let num=0, dx=0, dy=0;
+  for (let i=0;i<n;i++){ const a=xs[i]-mx, b=ys[i]-my; num += a*b; dx += a*a; dy += b*b; }
+  const den = Math.sqrt(dx*dy);
+  return den ? (num/den) : NaN;
+}
+
+/* Build scatter spec for rows + annotation (r) */
+function scatterSpecFor(rows, year, rVal, topN){
+  return {
+    $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+    width: 1000, height: 520,
+    data: { values: rows },
+    transform: [
+      { window: [{ op: "rank", as: "rankGDP" }], sort: [{ field: "gdp", order: "descending" }] },
+      { filter: `datum.rankGDP <= ${topN}` }
+    ],
+    layer: [
+      { mark: { type: "point", filled: true, opacity: 0.9 },
+        encoding: {
+          x: { field: "gdp", type: "quantitative", title: `GDP per capita (US$) — ${year}`, scale: { type: "log" } },
+          y: { field: "internet", type: "quantitative", title: "Internet users (% of population)", scale: { domain: [0,100] } },
+          tooltip: [
+            { field: "country",  title: "Country" },
+            { field: "code",     title: "ISO3" },
+            { field: "gdp",      title: "GDP pc (US$)", format: ",.0f" },
+            { field: "internet", title: "Internet (%)", format: ".1f" }
+          ],
+          color: { field: "internet", type: "quantitative", scale: { scheme: "blues" }, legend: null },
+          size:  { field: "internet", type: "quantitative", scale: { range: [40, 500] }, legend: null }
+        }
+      },
+      { transform: [{ loess: "internet", on: "gdp", bandwidth: 0.5 }],
+        mark: { type: "line", size: 3, opacity: 0.8 },
+        encoding: {
+          x: { field: "gdp", type: "quantitative", scale: { type: "log" } },
+          y: { field: "internet", type: "quantitative" }
+        }
+      },
+      // Annotation label (Pearson r)
+      {
+        data: { values: [{ label: `Pearson r (log GDP, internet): ${Number.isFinite(rVal) ? rVal.toFixed(2) : "—"}` }] },
+        mark: { type: "text", fontSize: 12, fontWeight: "bold", align: "left", baseline: "top" },
+        encoding: { x: { value: 24 }, y: { value: 24 }, text: { field: "label" }, color: { value: "#0f172a" } }
+      },
+      // A small rule under the annotation
+      {
+        data: { values: [{}] },
+        mark: { type: "rule", strokeWidth: 2, opacity: 0.6 },
+        encoding: { x: { value: 24 }, x2: { value: 340 }, y: { value: 44 }, color: { value: "#94a3b8" } }
+      }
+    ],
+    config: { view: { stroke: null }, background: "#ffffff", axis: { grid: true, gridColor: "#eef2f7" } }
+  };
+}
+
+/* =====================  RENDER MAP  ===================== */
+vegaEmbed("#visMap2021", map2021, { actions:false });
+
+/* =====================  LOAD + RENDER SCATTER  ===================== */
+async function loadAndBuildScatter(){
+  const msg = document.getElementById('scatterMsg');
+  const controls = document.getElementById('scatterControls');
+  const yearSel = document.getElementById('yearSelect');
+  const topNRange = document.getElementById('topNRange');
+  const topNVal = document.getElementById('topNVal');
+
+  try{
+    const [gdp, iu] = await Promise.all([
+      loadWorldBankGDPWide(GDP_FILE),
+      loadInternetUsersOWID()
+    ]);
+
+    const { byYear, years, defaultYear } = buildJoinedByYear(gdp, iu);
+
+    // Populate controls
+    yearSel.innerHTML = years.sort((a,b)=>b-a).map(y=>`<option value="${y}">${y} (${byYear.get(y).length})</option>`).join("");
+    yearSel.value = defaultYear;
+    topNVal.textContent = topNRange.value;
+    controls.style.display = "";
+
+    const render = async () => {
+      const year = Number(yearSel.value);
+      const allRows = byYear.get(year) || [];
+      const rows = allRows.slice(); // copy
+      const n = rows.length;
+
+      if (n < 3){
+        msg.innerHTML = `<div class="warn">Only ${n} country(ies) for ${year}. Try another year with more overlap.</div>`;
+      } else {
+        msg.textContent = `Year ${year} • Joined countries: ${n}.`;
+      }
+
+      // Compute r on the same Top-N slice (by GDP)
+      const sorted = rows.slice().sort((a,b)=>b.gdp - a.gdp);
+      const topN = Number(topNRange.value);
+      const slice = sorted.slice(0, topN);
+      const rVal = pearsonR(slice);
+
+      const spec = scatterSpecFor(rows, year, rVal, topN);
+      await vegaEmbed("#visScatter", spec, { actions:false });
+    };
+
+    yearSel.addEventListener('change', render);
+    topNRange.addEventListener('input', () => {
+      topNVal.textContent = topNRange.value;
+      render();
+    });
+
+    await render();
+  }catch(e){
+    console.error(e);
+    msg.innerHTML = `<div class="warn">Scatter error: ${e.message.replace(/</g,"&lt;")}</div>`;
+  }
+}
+
+loadAndBuildScatter();
 </script>
 </body>
 </html>
